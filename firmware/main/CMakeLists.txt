@@ -327,6 +327,9 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        sdmmc
+                        esp_driver_sdspi
+                        nofrendo
                         ArduinoJson
                         esp-now
                         mooncake
@@ -335,7 +338,23 @@ idf_component_register(SRCS ${SOURCES}
                     )
 
 target_compile_features(${COMPONENT_LIB} PUBLIC cxx_std_23)
+# The game converts a complete framebuffer on each video frame.
+set_source_files_properties(apps/app_game/game_video.cpp PROPERTIES COMPILE_OPTIONS "-O3")
 target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>)
+
+# Optional private ROM for controller testing. Keep the original outside Git.
+set(STACKCHAN_BUILTIN_ROM "" CACHE FILEPATH "Local Jackal iNES ROM to embed for controller testing")
+if(STACKCHAN_BUILTIN_ROM)
+    if(NOT EXISTS "${STACKCHAN_BUILTIN_ROM}")
+        message(FATAL_ERROR "STACKCHAN_BUILTIN_ROM does not exist")
+    endif()
+    # Use a stable build filename; Ninja response-file paths cannot contain
+    # unescaped parentheses from the original cartridge filename.
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom")
+    configure_file("${STACKCHAN_BUILTIN_ROM}" "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/jackal.nes" COPYONLY)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/jackal.nes" BINARY RENAME_TO stackchan_jackal)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_HAS_BUILTIN_ROM=1)
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE

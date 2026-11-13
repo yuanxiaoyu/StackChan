@@ -13,3 +13,4 @@
 #include "app_ezdata/app_ezdata.h"
 #include "app_dance/app_dance.h"
 #include "app_agent_tasks/app_agent_tasks.h"
+#include "app_game/app_game.h"

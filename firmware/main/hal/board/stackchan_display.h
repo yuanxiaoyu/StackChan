@@ -52,4 +52,6 @@ public:
     void LvglLock();
     void LvglUnlock();
     lv_disp_t* GetLvglDisplay();
+    bool BeginStorageAccess();
+    void EndStorageAccess();
 };

@@ -17,9 +17,49 @@
 #include <stackchan/stackchan.h>
 #include <assets/lang_config.h>
 #include <hal/hal.h>
+#include "game_board.h"
+#include <board.h>
+#include <driver/gpio.h>
+#include <esp_rom_gpio.h>
+#include <soc/spi_periph.h>
+#include <soc/gpio_sig_map.h>
 
 using namespace stackchan;
 using namespace stackchan::avatar;
+
+bool StackChanAvatarDisplay::BeginStorageAccess()
+{
+    LvglLock();
+    // A zero-length parameter transfer drains all previously queued LCD DMA.
+    if (esp_lcd_panel_io_tx_param(panel_io_, -1, nullptr, 0) != ESP_OK) {
+        LvglUnlock();
+        return false;
+    }
+    gpio_set_level(GPIO_NUM_3, 1);  // Keep LCD deselected during SD transactions.
+    gpio_set_direction(GPIO_NUM_35, GPIO_MODE_INPUT);
+    esp_rom_gpio_connect_in_signal(35, spi_periph_signal[SPI3_HOST].spiq_in, false);
+    return true;
+}
+
+void StackChanAvatarDisplay::EndStorageAccess()
+{
+    // SDSPI is synchronous. Return GPIO35 to the LCD's software DC output.
+    gpio_set_direction(GPIO_NUM_35, GPIO_MODE_OUTPUT);
+    esp_rom_gpio_connect_out_signal(35, SIG_GPIO_OUT_IDX, false, false);
+    gpio_set_level(GPIO_NUM_35, 1);
+    LvglUnlock();
+}
+
+bool game_board::storageBegin()
+{
+    auto* display = static_cast<StackChanAvatarDisplay*>(Board::GetInstance().GetDisplay());
+    return display && display->BeginStorageAccess();
+}
+
+void game_board::storageEnd()
+{
+    static_cast<StackChanAvatarDisplay*>(Board::GetInstance().GetDisplay())->EndStorageAccess();
+}
 
 #define TAG "StackChanAvatarDisplay"
 

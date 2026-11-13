@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: MIT
  */
 #include "joystick_handle.h"
+#include "freertos/semphr.h"
+#include "driver/gpio.h"
+static SemaphoreHandle_t joystick_mutex;
 
 i2c_bus_device_handle_t i2c_device1;  // i2c device handle
+static esp_err_t joystick_read_register(uint8_t reg, size_t size, uint8_t *data);
 
 /**
  * @brief Initialize joystick via I2C interface
@@ -20,6 +24,18 @@ i2c_bus_device_handle_t i2c_device1;  // i2c device handle
  */
 static void joystick_i2c_init()
 {
+    // Measure the physical bus with both pins released before assigning the
+    // ESP32 peripheral. This distinguishes a held external line from a driver
+    // that leaves its output asserted after a failed transaction.
+    gpio_reset_pin(GPIO_NUM_0);
+    gpio_reset_pin(GPIO_NUM_26);
+    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    gpio_set_direction(GPIO_NUM_26, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(GPIO_NUM_26, GPIO_PULLUP_ONLY);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_LOGI("GAME-REMOTE", "Mini JoyC released pins: SDA=%d SCL=%d",
+             gpio_get_level(GPIO_NUM_0), gpio_get_level(GPIO_NUM_26));
     i2c_config_t conf;
     {
         conf.mode             = I2C_MODE_MASTER;
@@ -31,10 +47,14 @@ static void joystick_i2c_init()
         conf.clk_flags        = 0;
     };
     i2c_bus_handle_t i2c0_bus = i2c_bus_create(I2C_NUM_0, &conf);
+    ESP_LOGI("GAME-REMOTE", "Mini JoyC driver ready: SDA=%d SCL=%d",
+             gpio_get_level(GPIO_NUM_0), gpio_get_level(GPIO_NUM_26));
     uint8_t buf[128];
     memset(buf, 0, sizeof(buf));
 
     i2c_bus_scan(i2c0_bus, buf, sizeof(buf));
+    ESP_LOGI("GAME-REMOTE", "Mini JoyC scan complete: SDA=%d SCL=%d",
+             gpio_get_level(GPIO_NUM_0), gpio_get_level(GPIO_NUM_26));
     for (size_t i = 0; i < sizeof(buf); i++) {
         if (buf[i] != 0) {
             ESP_LOGI("I2C Scanner", "Found device at address 0x%02X", buf[i]);
@@ -59,16 +79,92 @@ static void joystick_i2c_init()
  */
 static void joystick_read_xy(uint16_t *joyX, uint16_t *joyY)
 {
+    xSemaphoreTake(joystick_mutex, portMAX_DELAY);
     uint8_t data[4];
-    esp_err_t ret = i2c_bus_read_bytes(i2c_device1, 0x00, 2, data);
-    vTaskDelay(20 / portTICK_PERIOD_MS);
-    ret |= i2c_bus_read_bytes(i2c_device1, 0x02, 2, &data[2]);
+    esp_err_t ret = joystick_read_register(0x00, 2, data);
+
+    if (ret == ESP_OK) ret = joystick_read_register(0x02, 2, &data[2]);
     if (ret == ESP_OK) {
         *joyX = (data[1] << 8) | data[0];
         *joyY = (data[3] << 8) | data[2];
     } else {
         // ESP_LOGE("I2C Joystick", "Failed to read joystick data");
     }
+    xSemaphoreGive(joystick_mutex);
+}
+
+// The legacy i2c_bus helper waits 200 ms per failed transaction. GAME sends
+// heartbeat packets from the same task, so use a bounded read under the shared
+// joystick mutex instead of blocking the radio for three such timeouts.
+static esp_err_t joystick_read_register(uint8_t reg, size_t size, uint8_t *data)
+{
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    if (!cmd) return ESP_ERR_NO_MEM;
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (0x54 << 1) | I2C_MASTER_WRITE, true);
+    i2c_master_write_byte(cmd, reg, true);
+    // The HAT processes its register selector in ListenCplt (STOP). A repeated
+    // START read can arrive before the STM32 has prepared tx_buffer/tx_len.
+    i2c_master_stop(cmd);
+    esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, pdMS_TO_TICKS(10));
+    i2c_cmd_link_delete(cmd);
+    if (ret != ESP_OK) return ret;
+    // Diagnostic conservative timing: let the HAT's STOP callback prepare its
+    // response before another address event. The original reader also left a
+    // 20 ms idle interval between axis requests.
+    vTaskDelay(pdMS_TO_TICKS(20));
+    cmd = i2c_cmd_link_create();
+    if (!cmd) return ESP_ERR_NO_MEM;
+    i2c_master_start(cmd);
+    i2c_master_write_byte(cmd, (0x54 << 1) | I2C_MASTER_READ, true);
+    i2c_master_read(cmd, data, size, I2C_MASTER_LAST_NACK);
+    i2c_master_stop(cmd);
+    ret = i2c_master_cmd_begin(I2C_NUM_0, cmd, pdMS_TO_TICKS(10));
+    i2c_cmd_link_delete(cmd);
+    static unsigned trace_count;
+    if (trace_count < 12) {
+        ESP_LOGI("GAME-REMOTE", "Mini JoyC read reg=0x%02x result=%s value=%u",
+                 reg, esp_err_to_name(ret), ret == ESP_OK ? data[0] | (size > 1 ? data[1] << 8 : 0) : 0);
+        ++trace_count;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+    return ret;
+}
+
+bool joystick_read_game(uint16_t *x, uint16_t *y, bool *pressed)
+{
+    uint8_t data[4], button = 1;
+    *pressed = false;
+    if (xSemaphoreTake(joystick_mutex, pdMS_TO_TICKS(10)) != pdTRUE) return false;
+    // Center is independent of the axes: read it first and retain a valid
+    // press even if a later axis transaction fails.
+    uint8_t reg = 0x30;
+    esp_err_t ret = joystick_read_register(reg, 1, &button);
+    if (ret == ESP_OK) *pressed = button == 0;
+    // Mini JoyC serves a two-byte response per axis register, not a four-byte
+    // contiguous register window. Read X and Y as separate transactions.
+    if (ret == ESP_OK) {
+        reg = 0x00;
+        ret = joystick_read_register(reg, 2, data);
+    }
+    if (ret == ESP_OK) {
+        reg = 0x02;
+        ret = joystick_read_register(reg, 2, &data[2]);
+    }
+    xSemaphoreGive(joystick_mutex);
+    if (ret != ESP_OK) {
+        static TickType_t last_log;
+        TickType_t now = xTaskGetTickCount();
+        if (!last_log || now - last_log >= pdMS_TO_TICKS(5000)) {
+            ESP_LOGW("GAME-REMOTE", "Mini JoyC register 0x%02x: %s, SDA=%d SCL=%d",
+                     reg, esp_err_to_name(ret), gpio_get_level(GPIO_NUM_0), gpio_get_level(GPIO_NUM_26));
+            last_log = now;
+        }
+        return false;
+    }
+    *x = data[0] | (data[1] << 8);
+    *y = data[2] | (data[3] << 8);
+    return true;
 }
 
 /**
@@ -88,6 +184,7 @@ static void joystick_read_xy(uint16_t *joyX, uint16_t *joyY)
  */
 joystick_data_t joystick_init()
 {
+    joystick_mutex = xSemaphoreCreateMutex();
     joystick_i2c_init();
     joystick_data_t tmp;
     tmp.channel     = 1;
@@ -118,6 +215,7 @@ void handle_setup_screen(void *pvParam)
     while (1) {
         if (joystick_data->screen_mode == MODE_SETUP) {
             joystick_read_xy(&joystick_data->joyX, &joystick_data->joyY);
+            if (joystick_data->screen_mode != MODE_SETUP) continue;
             update_setup_screen(joystick_data);
             vTaskDelay(50 / portTICK_PERIOD_MS);
         } else {
@@ -145,7 +243,7 @@ void handle_running_screen(void *pvParam)
 {
     joystick_data_t *joystick_data = (joystick_data_t *)pvParam;
     // communicate packet
-    uint8_t pkt[8];
+    uint8_t pkt[8] = {0};
     pkt[0]              = joystick_data->id;  // id: 0 for broadcast
     int16_t yaw_angle   = 0;
     int16_t pitch_angle = 0;
@@ -158,6 +256,7 @@ void handle_running_screen(void *pvParam)
         if (joystick_data->screen_mode == MODE_RUNNING) {
             joystick_read_xy(&joystick_data->joyX, &joystick_data->joyY);
 
+            if (joystick_data->screen_mode != MODE_RUNNING) continue;
             if (running_screen != NULL && lv_obj_is_valid(running_screen)) {
                 update_running_screen(joystick_data->joyX, joystick_data->joyY, joystick_data->channel,
                                       joystick_data->id, joystick_data->bat);
@@ -234,7 +333,7 @@ void handle_imu_screen(void *pvParam)
     static IMU_Angle_t last_imu_angle = {0.0f, 0.0f};
 
     // communicate packet
-    uint8_t pkt[8];
+    uint8_t pkt[8] = {0};
     pkt[0]              = joystick_data->id;  // id: 0 for broadcast
     int16_t yaw_angle   = 0;
     int16_t pitch_angle = 0;

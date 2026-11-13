@@ -6,6 +6,7 @@
 #include "app_setup.h"
 #include "workers/feature_toggle.h"
 #include "../app_agent_tasks/agent_tasks_setup_worker.h"
+#include "../app_game/gamepad_setup_worker.h"
 #include <hal/hal.h>
 #include <mooncake.h>
 #include <mooncake_log.h>
@@ -146,7 +147,12 @@ void AppSetup::onOpen()
         },
         {
             "Apps",
-            {{"Agent 看板",
+            {{"Gamepad / 蓝牙手柄",
+              [&]() {
+                  _destroy_menu = true;
+                  _worker = std::make_unique<game::GamepadSetupWorker>();
+              }},
+             {"Agent 看板",
               [&]() {
                   _destroy_menu = true;
                   _worker       = std::make_unique<agent_tasks::SetupWorker>();

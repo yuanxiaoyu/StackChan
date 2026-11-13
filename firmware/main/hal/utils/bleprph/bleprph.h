@@ -167,6 +167,10 @@ void gatt_svr_register_cb(struct ble_gatt_register_ctxt *ctxt, void *arg);
 int gatt_svr_init(bool use_alt_uuid);
 
 void ble_prph_init(bool use_alt_uuid);
+/** Register the central hook before initialization; called on every host sync. */
+void ble_prph_set_sync_hook(void (*hook)(void));
+void ble_prph_set_reset_hook(void (*hook)(void));
+bool ble_prph_is_synced(void);
 
 #ifdef __cplusplus
 }

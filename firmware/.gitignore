@@ -37,7 +37,8 @@
 # Build files
 build/
 cmake-build-*/
-/components/
+/components/*
+!/components/nofrendo/
 managed_components/
 
 # PlatformIO

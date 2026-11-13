@@ -22,7 +22,6 @@ extern "C" void app_main(void)
 
     // HAL init
     GetHAL().init();
-
     // Setup ui hal
     ui_hal::on_delay([](uint32_t ms) { GetHAL().delay(ms); });
     ui_hal::on_get_tick([]() { return GetHAL().millis(); });
@@ -43,6 +42,7 @@ extern "C" void app_main(void)
         hal_toggles::register_app_id(hal_toggles::App::Dance, GetMooncake().installApp(std::make_unique<AppDance>()));
         GetMooncake().installApp(std::make_unique<AppSetup>());
         GetMooncake().installApp(std::make_unique<AppAgentTasks>());
+        GetMooncake().installApp(std::make_unique<AppGame>());
 
         // Main loop
         while (1) {

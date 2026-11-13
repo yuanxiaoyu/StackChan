@@ -86,8 +86,8 @@ void create_setup_screen()
     lv_obj_set_style_bg_opa(id_dropdown, LV_OPA_COVER, LV_PART_MAIN);                    // Ensure background is opaque
 
     lv_obj_t *btn_label = lv_label_create(setup_screen);
-    lv_label_set_text(btn_label, "Press to Start");
-    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_18, 0);
+    lv_label_set_text(btn_label, "A: Motion\nHold B: Game");
+    lv_obj_set_style_text_font(btn_label, &lv_font_montserrat_14, 0);
     lv_obj_align(btn_label, LV_ALIGN_BOTTOM_MID, 0, -30);
 
     lv_obj_t *arrow_label = lv_label_create(setup_screen);

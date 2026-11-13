@@ -564,14 +564,46 @@ private:
 
     void InitializeSpi()
     {
+        // Deselect the card before any LCD clocks. GPIO35 is shared SD MISO/LCD DC.
+        gpio_set_level(GPIO_NUM_4, 1);
+        gpio_set_direction(GPIO_NUM_4, GPIO_MODE_OUTPUT);
         spi_bus_config_t buscfg = {};
         buscfg.mosi_io_num      = GPIO_NUM_37;
-        buscfg.miso_io_num      = GPIO_NUM_NC;
+        buscfg.miso_io_num      = GPIO_NUM_35;
         buscfg.sclk_io_num      = GPIO_NUM_36;
         buscfg.quadwp_io_num    = GPIO_NUM_NC;
         buscfg.quadhd_io_num    = GPIO_NUM_NC;
         buscfg.max_transfer_sz  = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+        // A card in native SD mode may drive the shared DC line even while CS is
+        // high. Enter SPI mode before initializing the LCD, as M5GFX does.
+        spi_device_interface_config_t sd_config = {};
+        sd_config.clock_speed_hz = 400000;
+        sd_config.mode = 0;
+        sd_config.spics_io_num = GPIO_NUM_NC;
+        sd_config.queue_size = 1;
+        spi_device_handle_t sd = nullptr;
+        ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &sd_config, &sd));
+        uint8_t bytes[16];
+        memset(bytes, 0xff, sizeof(bytes));
+        spi_transaction_t transfer = {};
+        transfer.length = sizeof(bytes) * 8;
+        transfer.tx_buffer = bytes;
+        ESP_ERROR_CHECK(spi_device_polling_transmit(sd, &transfer));
+        gpio_set_level(GPIO_NUM_4, 0);
+        bytes[0] = 0x40;  // CMD0, argument zero, required CRC7 0x95.
+        bytes[1] = bytes[2] = bytes[3] = bytes[4] = 0;
+        bytes[5] = 0x95;
+        transfer.rx_buffer = bytes;
+        ESP_ERROR_CHECK(spi_device_polling_transmit(sd, &transfer));
+        gpio_set_level(GPIO_NUM_4, 1);
+        memset(bytes, 0xff, sizeof(bytes));
+        transfer.rx_buffer = nullptr;
+        transfer.length = 8;
+        transfer.rxlength = 0;  // The driver fills rxlength on prior full-duplex transfers.
+        ESP_ERROR_CHECK(spi_device_polling_transmit(sd, &transfer));
+        ESP_ERROR_CHECK(spi_bus_remove_device(sd));
+
     }
 
     void InitializeIli9342Display()

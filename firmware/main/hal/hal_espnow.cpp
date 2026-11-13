@@ -29,7 +29,7 @@ static esp_err_t _handle_espnow_received(uint8_t* src_addr, void* data, size_t s
 
     static uint32_t count = 0;
 
-    ESP_LOGI(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s", count++, MAC2STR(src_addr),
+    ESP_LOGD(TAG, "espnow_recv, <%" PRIu32 "> [" MACSTR "][%d][%d][%u]: %.*s", count++, MAC2STR(src_addr),
              rx_ctrl->channel, rx_ctrl->rssi, size, size, "~");
 
     std::vector<uint8_t> received_data((uint8_t*)data, (uint8_t*)data + size);

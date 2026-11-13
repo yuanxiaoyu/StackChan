@@ -17,6 +17,7 @@ extern "C" {
 #include "../joystick/joystick_basic.h"
 
 #define MODE_SETUP (0)
+#define MODE_GAME (3)
 
 #define CHANNEL_SELECT (0)
 #define ID_SELECT      (1)

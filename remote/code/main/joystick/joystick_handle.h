@@ -22,6 +22,9 @@ extern "C" {
 #include "joystick_basic.h"
 
 joystick_data_t joystick_init();
+// Return true when the axes are valid; pressed is independently valid after a
+// successful center read, even if a later axis read fails. Otherwise false.
+bool joystick_read_game(uint16_t *x, uint16_t *y, bool *pressed);
 void handle_setup_screen(void *pvParam);
 void handle_running_screen(void *pvParam);
 void handle_imu_screen(void *pvParam);

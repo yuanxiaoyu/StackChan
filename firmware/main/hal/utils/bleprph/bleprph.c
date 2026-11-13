@@ -78,6 +78,13 @@ static uint16_t bearers;
 #endif
 
 static bool s_use_alt_uuid = false;
+static bool s_initialized = false;
+static void (*s_sync_hook)(void) = NULL;
+static void (*s_reset_hook)(void) = NULL;
+void ble_prph_set_reset_hook(void (*hook)(void)) { s_reset_hook = hook; }
+void ble_prph_set_sync_hook(void (*hook)(void)) { s_sync_hook = hook; }
+bool ble_prph_is_synced(void) { return s_initialized && ble_hs_synced(); }
+
 
 void ble_store_config_init(void);
 
@@ -568,6 +575,7 @@ static int bleprph_gap_event(struct ble_gap_event *event, void *arg)
 
 static void bleprph_on_reset(int reason)
 {
+    if (s_reset_hook) s_reset_hook();
     MODLOG_DFLT(ERROR, "Resetting state; reason=%d\n", reason);
 }
 
@@ -612,6 +620,8 @@ static void bleprph_on_sync(void)
         return;
     }
 
+    if (s_sync_hook) s_sync_hook();
+
     /* Printing ADDR */
     uint8_t addr_val[6] = {0};
     rc                  = ble_hs_id_copy_addr(own_addr_type, addr_val, NULL);
@@ -638,6 +648,7 @@ void bleprph_host_task(void *param)
 
 void ble_prph_init(bool use_alt_uuid)
 {
+    if (s_initialized) return;
     s_use_alt_uuid = use_alt_uuid;
     int rc;
     esp_err_t ret;
@@ -655,13 +666,17 @@ void ble_prph_init(bool use_alt_uuid)
         ESP_LOGE(tag, "Failed to init nimble %d ", ret);
         return;
     }
+    s_initialized = true;
     /* Initialize the NimBLE host configuration. */
     ble_hs_cfg.reset_cb          = bleprph_on_reset;
     ble_hs_cfg.sync_cb           = bleprph_on_sync;
     ble_hs_cfg.gatts_register_cb = gatt_svr_register_cb;
     ble_hs_cfg.store_status_cb   = ble_store_util_status_rr;
 
-    ble_hs_cfg.sm_io_cap = CONFIG_EXAMPLE_IO_TYPE;
+    ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 #ifdef CONFIG_EXAMPLE_BONDING
     ble_hs_cfg.sm_bonding = 1;
     /* Enable the appropriate bit masks to make sure the keys
@@ -673,11 +688,8 @@ void ble_prph_init(bool use_alt_uuid)
 #ifdef CONFIG_EXAMPLE_MITM
     ble_hs_cfg.sm_mitm = 1;
 #endif
-#ifdef CONFIG_EXAMPLE_USE_SC
+    /* Prefer LE Secure Connections; legacy Just Works peers remain supported. */
     ble_hs_cfg.sm_sc = 1;
-#else
-    ble_hs_cfg.sm_sc = 0;
-#endif
 #ifdef CONFIG_EXAMPLE_RESOLVE_PEER_ADDR
     /* Stores the IRK */
     ble_hs_cfg.sm_our_key_dist |= BLE_SM_PAIR_KEY_DIST_ID;

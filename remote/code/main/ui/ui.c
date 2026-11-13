@@ -4,6 +4,14 @@
  * SPDX-License-Identifier: MIT
  */
 #include "ui.h"
+#include "lvgl_port.h"
+
+static void load_screen(lv_obj_t *screen)
+{
+    while (!lvgl_port_lock()) vTaskDelay(1);
+    lv_scr_load_anim(screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+    lvgl_port_unlock();
+}
 
 /**
  * @brief Switches between different UI screens based on the provided screen ID
@@ -41,7 +49,7 @@ void switch_screen(int screen_id)
         // Load only if object is valid
         if (setup_screen != NULL && lv_obj_is_valid(setup_screen)) {
             ESP_LOGI("UI", "Setup screen loaded");
-            lv_scr_load_anim(setup_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+            load_screen(setup_screen);
         } else {
             ESP_LOGE("UI", "Setup screen is NULL or invalid!");
             ui_setup_screen_destory();
@@ -56,7 +64,7 @@ void switch_screen(int screen_id)
         // Load only if object is valid
         if (running_screen != NULL && lv_obj_is_valid(running_screen)) {
             ESP_LOGI("UI", "Running screen loaded");
-            lv_scr_load_anim(running_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+            load_screen(running_screen);
         } else {
             ESP_LOGE("UI", "Running screen is NULL or invalid!");
             ui_running_screen_destory();
@@ -71,7 +79,7 @@ void switch_screen(int screen_id)
         // Load only if object is valid
         if (imu_screen != NULL && lv_obj_is_valid(imu_screen)) {
             ESP_LOGI("UI", "IMU screen loaded");
-            lv_scr_load_anim(imu_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, false);
+            load_screen(imu_screen);
         } else {
             ESP_LOGE("UI", "Running screen is NULL or invalid!");
             ui_imu_screen_destory();
@@ -94,5 +102,7 @@ void switch_screen(int screen_id)
 void ui_init()
 {
     create_setup_screen();
+    while (!lvgl_port_lock()) vTaskDelay(1);
     lv_disp_load_scr(setup_screen);
+    lvgl_port_unlock();
 }
