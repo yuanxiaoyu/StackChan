@@ -24,7 +24,8 @@ public:
     {
         // 绑定信号
         _signal_connection = GetHAL().onHeadPetGesture.connect([this](HeadPetGesture gesture) {
-            if (gesture == HeadPetGesture::SwipeForward || gesture == HeadPetGesture::SwipeBackward) {
+            if (gesture == HeadPetGesture::Press || gesture == HeadPetGesture::SwipeForward ||
+                gesture == HeadPetGesture::SwipeBackward) {
                 _event_swipe = true;
             } else if (gesture == HeadPetGesture::Release) {
                 _event_release = true;

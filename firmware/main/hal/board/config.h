@@ -6,8 +6,10 @@
 #include <driver/gpio.h>
 
 #define AUDIO_INPUT_REFERENCE    true
-#define AUDIO_INPUT_SAMPLE_RATE  24000
-#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+// ESP-SR and the Opus voice path both operate at 16 kHz. Keeping the codec
+// native rate here avoids a 24 kHz stereo resampler allocation every 10 ms.
+#define AUDIO_INPUT_SAMPLE_RATE  16000
+#define AUDIO_OUTPUT_SAMPLE_RATE 16000
 
 #define AUDIO_I2S_GPIO_MCLK GPIO_NUM_0
 #define AUDIO_I2S_GPIO_WS GPIO_NUM_33
