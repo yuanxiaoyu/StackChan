@@ -647,3 +647,24 @@ index 7f7582b..3eb9d46 100644
  }
  
  void AudioService::Stop() {
+diff --git a/main/audio/wake_words/custom_wake_word.cc b/main/audio/wake_words/custom_wake_word.cc
+index 681d02c..316d96d 100644
+--- a/main/audio/wake_words/custom_wake_word.cc
++++ b/main/audio/wake_words/custom_wake_word.cc
+@@ -99,6 +99,16 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list)
+         ParseWakenetModelConfig();
+     }
+ 
++#ifdef CONFIG_CUSTOM_WAKE_WORD
++    // The speech-model asset index can contain its own default command and
++    // threshold. The selected firmware custom wake word must take precedence.
++    threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
++    commands_.clear();
++    commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
++    ESP_LOGI(TAG, "Using firmware wake word: %s, threshold: %.2f",
++             CONFIG_CUSTOM_WAKE_WORD_DISPLAY, threshold_);
++#endif
++
+     if (models_ == nullptr || models_->num == -1) {
+         ESP_LOGE(TAG, "Failed to initialize wakenet model");
+         return false;
