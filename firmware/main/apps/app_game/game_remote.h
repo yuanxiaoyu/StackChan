@@ -31,7 +31,10 @@ public:
         if (!data) return false;
         const bool connected = read(now).connected;
         if (size == 7 && data[0] == 'G' && data[1] == 'P' && data[2] == 1) {
-            if (data[3] != 0 && data[3] != 1) return false;
+            // Byte 3 is the remote's configured target ID.  GAME currently
+            // receives the selected ESP-NOW peer directly, so it must accept
+            // every valid target ID rather than treating IDs other than 0/1
+            // as a malformed protocol version.
             const auto delta = static_cast<uint8_t>(data[6] - sequence_);
             if (connected && !legacy_ && (delta == 0 || delta >= 128)) return false;
             sequence_ = data[6];

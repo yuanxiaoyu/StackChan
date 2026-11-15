@@ -77,10 +77,14 @@ int main()
     released[6] = 1; released[4] = 2;
     assert(input.receive(released, sizeof(released), 140));
     assert(!input.read(500).connected && input.read(500).buttons == 0);
+    held[6] = 2;
     held[3] = 2;
-    assert(!input.receive(held, sizeof(held), 510)); // another target
-    held[3] = 1;
-    assert(input.receive(held, sizeof(held), 520)); // new session after link expiry
+    assert(input.receive(held, sizeof(held), 510)); // target IDs are metadata
+    assert(input.read(515).buttons == 0x81);
+    held[6] = 3;
+    held[3] = 7;
+    assert(input.receive(held, sizeof(held), 520)); // arbitrary configured target
+    assert(input.read(525).buttons == 0x81);
     assert(!input.receive(held, 6, 530));
     assert(input.read(535).buttons == 0x81);
 

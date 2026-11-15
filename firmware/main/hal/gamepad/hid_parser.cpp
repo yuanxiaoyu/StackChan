@@ -5,7 +5,12 @@ namespace gamepad {
 // Implemented from the published wire format, without vendor library code.
 bool decodeCodexPad(const uint8_t* p, size_t len, uint16_t& result)
 {
-    if (!p || len != 8) return false;
+    if (!p || (len != 8 && len != 9)) return false;
+    if (len == 9) {
+        // Some BLE stacks retain the private report's ID byte in notifications.
+        if (p[0] != 0 && p[0] != 1) return false;
+        ++p;
+    }
     uint32_t bits = uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
     uint16_t out  = 0;
     static constexpr uint16_t mapping[] = {Up, Down, Left, Right, 0, 0, A, B, 0, 0, 0, 0, 0, 0, Select, Start, Menu};
@@ -138,6 +143,13 @@ bool HidParser::parseMap(const uint8_t* data, size_t len)
 bool HidParser::input(uint8_t id, const uint8_t* data, size_t len)
 {
     if (!data || !hasReport(id) || len < (bits_[id] + 7u) / 8u) return false;
+    const size_t payload = (bits_[id] + 7u) / 8u;
+    // HOGP notifications include the report ID when the descriptor uses one;
+    // the parser's field offsets are relative to the payload after that byte.
+    if (id && len == payload + 1 && data[0] == id) {
+        ++data;
+        len = payload;
+    }
     uint16_t out = 0;
     for (const auto& f : fields_) {
         if (f.id != id) continue;

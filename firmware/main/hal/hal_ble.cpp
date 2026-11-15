@@ -278,6 +278,7 @@ static int _handle_ble_config_write(const char* json_data, uint16_t len, uint16_
     if (payload_len == 0) {
         return 0;
     }
+    mclog::tagInfo(_tag, "BLE config write assembled: bytes={}, conn={}", payload_len, conn_handle);
     GetHAL().onBleConfigData.emit(_cachePayload(_config_payload_cache, payload));
     return 0;
 }
@@ -529,7 +530,9 @@ private:
 
     void handle_handshake(std::string_view data)
     {
+        mclog::tagInfo(_tag, "BLE handshake received: data_bytes={}", data.size());
         auto token = secret_logic::generate_handshake_token(data);
+        mclog::tagInfo(_tag, "BLE handshake response generated: token_bytes={}", token.size());
         notify_state(4, token.c_str());
     }
 

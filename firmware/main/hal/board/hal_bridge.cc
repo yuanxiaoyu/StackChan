@@ -7,6 +7,7 @@
 #include "stackchan_display.h"
 #include <esp_log.h>
 #include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <nvs.h>
 #include <nvs_flash.h>
 #include <driver/gpio.h>
@@ -113,9 +114,17 @@ void start_xiaozhi_app()
 {
     set_xiaozhi_mode(true);
 
+    heap_caps_register_failed_alloc_callback([](size_t size, uint32_t caps, const char* function) {
+        ESP_LOGE(_tag, "Allocation failed: bytes=%u caps=0x%lx function=%s", static_cast<unsigned>(size),
+                 static_cast<unsigned long>(caps), function);
+    });
+
     // Initialize and run the application
     auto& app = Application::GetInstance();
     app.Initialize();
+    ESP_LOGI(_tag, "AI initialized: internal free=%u largest=%u",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
     app.Run();  // This function runs the main event loop and never returns
 }
 

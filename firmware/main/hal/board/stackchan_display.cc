@@ -10,6 +10,7 @@
 #include <esp_psram.h>
 #include <vector>
 #include <cstring>
+#include <esp_rom_gpio.h>
 #include <src/misc/cache/lv_cache.h>
 #include <settings.h>
 #include <lvgl.h>
@@ -20,32 +21,49 @@
 #include "game_board.h"
 #include <board.h>
 #include <driver/gpio.h>
-#include <esp_rom_gpio.h>
-#include <soc/spi_periph.h>
 #include <soc/gpio_sig_map.h>
+#include <soc/spi_periph.h>
 
 using namespace stackchan;
 using namespace stackchan::avatar;
 
+namespace {
+// CoreS3 routes LCD D/C and SD MISO through the same GPIO on SPI3.
+void setSharedDcMisoForSd(bool sd)
+{
+    if (sd) {
+        gpio_set_direction(GPIO_NUM_35, GPIO_MODE_INPUT);
+        gpio_set_pull_mode(GPIO_NUM_35, GPIO_PULLUP_ONLY);
+        esp_rom_gpio_connect_in_signal(35, spi_periph_signal[SPI3_HOST].spiq_in, false);
+    } else {
+        gpio_set_direction(GPIO_NUM_35, GPIO_MODE_OUTPUT);
+        esp_rom_gpio_connect_out_signal(35, SIG_GPIO_OUT_IDX, false, false);
+    }
+}
+}  // namespace
+
 bool StackChanAvatarDisplay::BeginStorageAccess()
 {
+    ESP_LOGI("NES-SD", "Waiting for display lock before SD access");
     LvglLock();
+    ESP_LOGI("NES-SD", "Display lock acquired; draining LCD transfers");
     // A zero-length parameter transfer drains all previously queued LCD DMA.
     if (esp_lcd_panel_io_tx_param(panel_io_, -1, nullptr, 0) != ESP_OK) {
+        ESP_LOGE("NES-SD", "Failed to drain LCD transfers");
         LvglUnlock();
         return false;
     }
+    ESP_LOGI("NES-SD", "LCD transfers drained; switching shared GPIO35 to SD MISO");
     gpio_set_level(GPIO_NUM_3, 1);  // Keep LCD deselected during SD transactions.
-    gpio_set_direction(GPIO_NUM_35, GPIO_MODE_INPUT);
-    esp_rom_gpio_connect_in_signal(35, spi_periph_signal[SPI3_HOST].spiq_in, false);
+    setSharedDcMisoForSd(true);
     return true;
 }
 
 void StackChanAvatarDisplay::EndStorageAccess()
 {
     // SDSPI is synchronous. Return GPIO35 to the LCD's software DC output.
-    gpio_set_direction(GPIO_NUM_35, GPIO_MODE_OUTPUT);
-    esp_rom_gpio_connect_out_signal(35, SIG_GPIO_OUT_IDX, false, false);
+    ESP_LOGI("NES-SD", "SD access finished; restoring display GPIO35");
+    setSharedDcMisoForSd(false);
     gpio_set_level(GPIO_NUM_35, 1);
     LvglUnlock();
 }
@@ -171,6 +189,7 @@ StackChanAvatarDisplay::StackChanAvatarDisplay(esp_lcd_panel_io_handle_t panel_i
         .io_handle      = panel_io_,
         .panel_handle   = panel_,
         .control_handle = nullptr,
+        // Keep internal DMA usage low enough for Wi-Fi after audio startup.
         .buffer_size    = static_cast<uint32_t>(width_ * 20),
         .double_buffer  = false,
         .trans_size     = 0,

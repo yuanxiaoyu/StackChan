@@ -77,7 +77,7 @@ void AppGame::draw(Screen screen)
         image_ = lv_image_create(root_);
         lv_image_set_src(image_, &frame_desc_);
         lv_obj_set_pos(image_, 0, 0);
-        // Keep all 320x240 pixels for video; tapping opens the existing menu.
+        // Fill the LCD width; tapping opens the menu.
         lv_obj_add_event_cb(root_, [](lv_event_t* e) {
             static_cast<AppGame*>(lv_event_get_user_data(e))->action_ = Action::Pause;
         }, LV_EVENT_CLICKED, this);
@@ -129,20 +129,21 @@ void AppGame::drawLibraryRows()
 void AppGame::beginScan()
 {
     if (scan_ && !scan_->done.load()) return;
-    if (game::builtinRom().data) {
-        library_ = game::scanRoms();
-        scan_.reset();
-        selected_ = 0;
-        message_ = library_.status;
-        LvglLockGuard lock;
-        draw(Screen::Library);
-        return;
-    }
     scan_ = std::make_shared<ScanResult>();
+    message_ = library_.games.empty() ? "Reading SD card ..." : "Reading SD card in background ...";
+    {
+        LvglLockGuard lock;
+        draw(library_.games.empty() ? Screen::Loading : Screen::Library);
+    }
     auto* arg = new std::shared_ptr<ScanResult>(scan_);
     if (xTaskCreate([](void* p) {
         std::unique_ptr<std::shared_ptr<ScanResult>> result(static_cast<std::shared_ptr<ScanResult>*>(p));
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ESP_LOGI("GAME", "SD scan task started; internal heap free=%u largest=%u",
+                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         (*result)->library = game::scanRoms();
+        ESP_LOGI("GAME", "SD scan task finished; games=%u", unsigned((*result)->library.games.size()));
         (*result)->done.store(true);
         result.reset();
         vTaskDelete(nullptr);
@@ -150,10 +151,10 @@ void AppGame::beginScan()
         delete arg;
         scan_->library.status = "Cannot create SD task";
         scan_->done = true;
+        ESP_LOGE("GAME", "Cannot create SD scan task; internal heap free=%u largest=%u",
+                 heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     }
-    message_ = "Reading SD card /room ...";
-    LvglLockGuard lock;
-    draw(Screen::Loading);
 }
 
 void AppGame::enableRemote()
@@ -168,12 +169,12 @@ void AppGame::enableRemote()
     // The weak state keeps shutdown safe and never retains the AppGame object.
     game::setInputReader([weak]() -> uint16_t {
         const auto ble = gamepad::snapshot();
-        if (ble.connected) return ble.buttons;
+        uint16_t result = ble.connected ? ble.buttons : 0;
         if (auto state = weak.lock()) {
             std::lock_guard<std::mutex> lock(state->mutex);
-            return state->input.read(GetHAL().millis()).buttons;
+            result |= state->input.read(GetHAL().millis()).buttons;
         }
-        return 0;
+        return result;
     });
     radio_connection_ = GetHAL().onEspNowData.connect([weak](const std::vector<uint8_t>& data) {
         if (auto state = weak.lock()) {
@@ -197,6 +198,9 @@ void AppGame::onRendered(lv_event_t* event)
 
 void AppGame::onOpen()
 {
+    ESP_LOGI("GAME", "Opening GAME; internal heap free=%u largest=%u",
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     {
         LvglLockGuard lock;
         refresh_count_ = 0;
@@ -209,14 +213,28 @@ void AppGame::onOpen()
     connected_before_ = false; combo_used_ = false; combo_at_ = 0;
     connection_pause_ = {};
     radio_started_ = false; radio_requested_ = true;
+    const auto builtin = game::builtinRom();
+    if (builtin.data) {
+        library_.games.push_back({"Guevara / 古巴战士", game::builtinRomPath, builtin.size});
+        library_.status = "Built-in game; reading SD card in background";
+        message_ = library_.status;
+        LvglLockGuard lock;
+        draw(Screen::Library);
+    }
     // I2S requires internal DMA memory. Reserve it before the radio stacks and
     // NES worker consume/fragment that heap; the board keeps the codec alive.
+    ESP_LOGI("GAME", "Initializing audio codec");
     Board::GetInstance().GetAudioCodec();
+    ESP_LOGI("GAME", "Audio codec ready; allocating frame buffer");
     frame_ = static_cast<uint16_t*>(heap_caps_calloc(game::FramePixels, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!frame_) {
         message_ = "Not enough memory for video";
         LvglLockGuard lock; draw(Screen::Error); return;
     }
+    // ESP-NOW allocates Wi-Fi buffers from internal RAM. Start it before the
+    // audio codec and BLE host consume that pool, otherwise radio startup can
+    // fail with ESP_ERR_NO_MEM and leave the remote silently unusable.
+    enableRemote();
     frame_desc_ = {};
     frame_desc_.header.magic = LV_IMAGE_HEADER_MAGIC;
     frame_desc_.header.cf = LV_COLOR_FORMAT_RGB565;
@@ -225,14 +243,21 @@ void AppGame::onOpen()
     frame_desc_.data_size = game::FramePixels * 2;
     frame_desc_.data = reinterpret_cast<const uint8_t*>(frame_);
     // One existing NimBLE host serves both BLE peripherals and gamepad clients.
-    gamepad::initialize();
-    game::setInputReader([]() -> uint16_t {
-        const auto ble = gamepad::snapshot();
-        return ble.connected ? ble.buttons : 0;
-    });
-    GetHAL().startBleServer();
-    beginScan();
-    if (game::builtinRom().data && !library_.games.empty()) action_ = Action::Launch;
+    // ESP-NOW and NimBLE together exceed the available internal heap on this
+    // board. Keep the radio input active when it started successfully; BLE
+    // gamepad support remains available when ESP-NOW cannot be started.
+    ESP_LOGI("GAME", "Initializing gamepad and BLE");
+    if (!radio_started_) {
+        gamepad::initialize();
+        game::setInputReader([]() -> uint16_t {
+            const auto ble = gamepad::snapshot();
+            return ble.connected ? ble.buttons : 0;
+        });
+        GetHAL().startBleServer();
+        ESP_LOGI("GAME", "BLE ready; starting SD scan");
+    } else {
+        ESP_LOGI("GAME", "ESP-NOW ready; BLE gamepad disabled for internal RAM");
+    }
     {
         LvglLockGuard lock;
         video_timer_ = lv_timer_create(onVideoTimer, 16, this);
@@ -241,6 +266,8 @@ void AppGame::onOpen()
         if (auto* refresh = lv_display_get_refr_timer(lv_display_get_default()))
             lv_timer_set_period(refresh, 16);
     }
+    // Finish opening the app before the SD worker takes the shared display lock.
+    beginScan();
 }
 
 void AppGame::updateInput(uint32_t now)
@@ -252,7 +279,7 @@ void AppGame::updateInput(uint32_t now)
         remote = radio_->input.read(GetHAL().millis());
     }
     const bool connected = ble.connected || remote.connected;
-    const uint16_t mask = ble.connected ? ble.buttons : remote.buttons;
+    const uint16_t mask = (ble.connected ? ble.buttons : 0) | remote.buttons;
     const uint16_t pressed = mask & ~previous_buttons_;
     const bool changed = mask != previous_buttons_;
     previous_buttons_ = mask;
@@ -290,7 +317,8 @@ void AppGame::updateInput(uint32_t now)
         if (pressed & (gamepad::A | gamepad::Start)) action_ = Action::Launch;
         if (pressed & gamepad::B) action_ = Action::Exit;
     } else if (screen_ == Screen::Paused) {
-        const auto next = game::pauseMenuSelection(pause_selected_, pressed);
+        const auto navigation = game::pauseMenuNavigation(pressed, mask, now, pause_move_at_);
+        const auto next = game::pauseMenuSelection(pause_selected_, navigation);
         if (next != pause_selected_) {
             pause_selected_ = next;
             LvglLockGuard lock; draw(Screen::Paused);

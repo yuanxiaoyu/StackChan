@@ -312,6 +312,7 @@ static void bleprph_advertise(void)
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
+    ESP_LOGI(tag, "Advertising StackChan service (%s UUID)", s_use_alt_uuid ? "APP setup" : "game");
     rc = ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, bleprph_gap_event, NULL);
     if (rc != 0) {
         MODLOG_DFLT(ERROR, "error enabling advertisement; rc=%d\n", rc);
@@ -648,7 +649,22 @@ void bleprph_host_task(void *param)
 
 void ble_prph_init(bool use_alt_uuid)
 {
-    if (s_initialized) return;
+    /*
+     * NimBLE is shared by the gamepad and StackChan App services.  The
+     * service table is registered only once, but the advertised service UUID
+     * must follow the current mode: the normal control app uses the base UUID
+     * and Wi-Fi/account provisioning uses the alternate UUID.  Returning
+     * without updating the mode leaves a device that has already opened GAME
+     * invisible to the provisioning screen after an unbind.
+     */
+    if (s_initialized) {
+        s_use_alt_uuid = use_alt_uuid;
+        if (ble_hs_synced()) {
+            (void)ble_gap_adv_stop();
+            bleprph_advertise();
+        }
+        return;
+    }
     s_use_alt_uuid = use_alt_uuid;
     int rc;
     esp_err_t ret;

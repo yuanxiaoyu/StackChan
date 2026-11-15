@@ -1,6 +1,8 @@
 #include "game_runtime.h"
 #include "game_storage.h"
 #include "game_video.h"
+#include "builtin_rom.h"
+#include "game_menu.h"
 #include <atomic>
 #include <mutex>
 #include <cstring>
@@ -42,6 +44,7 @@ void worker(void*)
     uint8_t* video    = nullptr;
     uint16_t* palette = nullptr;
     bool initialized  = false;
+    bool jackalCompatible = false;
     AudioCodec* codec = nullptr;
     bool wasOutput    = false;
     if (!data) {
@@ -68,6 +71,8 @@ void worker(void*)
         fail("Cannot initialize cartridge mapper");
         goto cleanup;
     }
+     jackalCompatible = nes_getptr()->cart && nes_getptr()->cart->mapper_number == 2 &&
+                         nes_getptr()->cart->prg_rom_banks == 8 && nes_getptr()->cart->chr_rom_banks == 0;
     nes_setvidbuf(video);
     input_connect(0, NES_JOYPAD);
     ESP_LOGI("NES", "Started mapper %d, ROM %u bytes", nes_getptr()->cart->mapper_number, unsigned(size));
@@ -89,6 +94,7 @@ void worker(void*)
         uint32_t audioSamples = 0, sourceNonzero = 0, sourceClipped = 0, sinkNonzero = 0;
         int sourcePeak = 0;
         double sourceSquares = 0;
+        game::JackalContinueInputState jackalContinueInputState;
         while (!quit.load()) {
             if (paused.load()) {
                 input_update(0, 0);
@@ -103,7 +109,13 @@ void worker(void*)
                 continue;
             }
             const int64_t frameStart = esp_timer_get_time();
-            const uint16_t currentInput = (buttons.load() | (inputReader ? inputReader() : 0)) & 255;
+            uint16_t currentInput = (buttons.load() | (inputReader ? inputReader() : 0)) & 255;
+            if (jackalCompatible) {
+                // Jackal's disassembly stores the continue-screen state in $18/$19.
+                const auto* ram = nes_getptr()->mem->ram;
+                currentInput = game::jackalContinueInput(currentInput, jackalCompatible, ram[0x18], ram[0x19],
+                                                          count * 1000 / 60, jackalContinueInputState);
+            }
             input_update(0, currentInput);
             if (currentInput != lastInput) {
                 ESP_LOGD("GAME-INPUT", "Emulator buttons=0x%02x", unsigned(currentInput));

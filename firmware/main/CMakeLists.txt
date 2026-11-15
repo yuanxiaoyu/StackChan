@@ -343,7 +343,7 @@ set_source_files_properties(apps/app_game/game_video.cpp PROPERTIES COMPILE_OPTI
 target_compile_options(${COMPONENT_LIB} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=gnu++23>)
 
 # Optional private ROM for controller testing. Keep the original outside Git.
-set(STACKCHAN_BUILTIN_ROM "" CACHE FILEPATH "Local Jackal iNES ROM to embed for controller testing")
+set(STACKCHAN_BUILTIN_ROM "" CACHE FILEPATH "Local NES ROM to embed as the offline default game")
 if(STACKCHAN_BUILTIN_ROM)
     if(NOT EXISTS "${STACKCHAN_BUILTIN_ROM}")
         message(FATAL_ERROR "STACKCHAN_BUILTIN_ROM does not exist")
@@ -351,8 +351,8 @@ if(STACKCHAN_BUILTIN_ROM)
     # Use a stable build filename; Ninja response-file paths cannot contain
     # unescaped parentheses from the original cartridge filename.
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom")
-    configure_file("${STACKCHAN_BUILTIN_ROM}" "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/jackal.nes" COPYONLY)
-    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/jackal.nes" BINARY RENAME_TO stackchan_jackal)
+    configure_file("${STACKCHAN_BUILTIN_ROM}" "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/gevara.nes" COPYONLY)
+    target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_BINARY_DIR}/builtin_rom/gevara.nes" BINARY RENAME_TO stackchan_gevara)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE STACKCHAN_HAS_BUILTIN_ROM=1)
 endif()
 

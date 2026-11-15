@@ -598,3 +598,52 @@ index eda3fd7..ce17ee5 100644
      bool has_serial_number_ = false;
      bool has_activation_challenge_ = false;
      std::string current_version_;
+diff --git a/main/audio/audio_service.cc b/main/audio/audio_service.cc
+index 7f7582b..3eb9d46 100644
+--- a/main/audio/audio_service.cc
++++ b/main/audio/audio_service.cc
+@@ -1,5 +1,7 @@
+ #include "audio_service.h"
+ #include <esp_log.h>
++#include <esp_heap_caps.h>
++#include <freertos/idf_additions.h>
+ #include <cstring>
+ 
+ #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)                                        \
+@@ -160,14 +162,28 @@ void AudioService::Start() {
+         "audio_output", 2048, this, 4, &audio_output_task_handle_);
+ #endif
+ 
+-    /* Start the opus codec task */
+-    xTaskCreate(
+-        [](void* arg) {
+-            AudioService* audio_service = (AudioService*)arg;
+-            audio_service->OpusCodecTask();
+-            vTaskDelete(NULL);
+-        },
+-        "opus_codec", 2048 * 12, this, 2, &opus_codec_task_handle_);
++    /* Keep the large codec stack out of the internal RAM needed by Wi-Fi and
++     * activation. Its TCB stays internal and the stack size is unchanged. */
++    auto opus_task = [](void* arg) {
++        AudioService* audio_service = (AudioService*)arg;
++        audio_service->OpusCodecTask();
++#if CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
++        vTaskDeleteWithCaps(NULL);
++#else
++        vTaskDelete(NULL);
++#endif
++    };
++#if CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
++    auto opus_result = xTaskCreateWithCaps(opus_task, "opus_codec", 2048 * 12, this, 2,
++                                         &opus_codec_task_handle_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
++#else
++    auto opus_result = xTaskCreate(opus_task, "opus_codec", 2048 * 12, this, 2,
++                                  &opus_codec_task_handle_);
++#endif
++    ESP_ERROR_CHECK(opus_result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
++#if CONFIG_SPIRAM && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
++    ESP_LOGI(TAG, "Opus codec task stack: PSRAM (24576 bytes)");
++#endif
+ }
+ 
+ void AudioService::Stop() {

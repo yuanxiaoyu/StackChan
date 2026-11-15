@@ -3,7 +3,7 @@
 #include <cstdint>
 
 namespace game {
-inline constexpr char builtinRomPath[] = "builtin:jackal";
+inline constexpr char builtinRomPath[] = "builtin:gevara";
 struct BuiltinRom {
     const uint8_t* data;
     size_t size;

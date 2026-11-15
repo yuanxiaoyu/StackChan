@@ -19,8 +19,8 @@ int main()
     assert(game::FrameWidth == width && game::FrameHeight == height);
     for (size_t y = 0; y < height; ++y)
         for (size_t x = 0; x < width; ++x) {
-            const size_t sourceX = x * 256 / width;
-            assert(output[1 + y * width + x] == palette[(sourceX + 17 * y) % 251]);
+            const size_t source_x = (x * 256) / 320;
+            assert(output[1 + y * width + x] == palette[(source_x + 17 * y) % 251]);
         }
     assert(output.front() == 0xDEAD && output.back() == 0xDEAD);
 }

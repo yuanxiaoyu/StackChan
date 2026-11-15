@@ -35,7 +35,7 @@ private:
     lv_timer_t* video_timer_ = nullptr;
     uint16_t* frame_ = nullptr;
     size_t selected_ = 0, pause_selected_ = 0;
-    uint32_t last_move_ = 0, combo_at_ = 0, pulse_until_ = 0;
+    uint32_t last_move_ = 0, pause_move_at_ = 0, combo_at_ = 0, pulse_until_ = 0;
     uint16_t previous_buttons_ = 0, pulse_ = 0;
     bool radio_started_ = false, radio_requested_ = true, connected_before_ = false, combo_used_ = false;
     int radio_connection_ = -1;

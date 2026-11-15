@@ -12,6 +12,7 @@
 #include <driver/sdspi_host.h>
 #include <esp_vfs_fat.h>
 #include <esp_heap_caps.h>
+#include <esp_err.h>
 namespace game {
 namespace {
 std::mutex storageMutex;
@@ -30,23 +31,36 @@ struct Access {
 bool mount(std::string& error)
 {
     if (card) return true;
-    sdmmc_host_t host                    = SDSPI_HOST_DEFAULT();
-    host.slot                            = SPI3_HOST;
-    host.max_freq_khz                    = 4000;
-    sdspi_device_config_t slot           = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot.host_id                         = SPI3_HOST;
-    slot.gpio_cs                         = GPIO_NUM_4;
-    esp_vfs_fat_sdmmc_mount_config_t cfg = {};
-    cfg.format_if_mount_failed           = false;
-    cfg.max_files                        = 4;
-    cfg.allocation_unit_size             = 16384;
-    auto e                               = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &cfg, &card);
-    if (e != ESP_OK) {
-        card  = nullptr;
-        error = "SD card unavailable (" + std::to_string(e) + ")";
+    const int frequencies[] = {400, 1000, 4000, 10000, 20000};
+    esp_err_t last = ESP_FAIL;
+    int mountedFrequency = 0;
+    for (const int frequency : frequencies) {
+        sdmmc_host_t host                    = SDSPI_HOST_DEFAULT();
+        host.slot                            = SPI3_HOST;
+        host.max_freq_khz                    = frequency;
+        sdspi_device_config_t slot           = SDSPI_DEVICE_CONFIG_DEFAULT();
+        slot.host_id                         = SPI3_HOST;
+        slot.gpio_cs                         = GPIO_NUM_4;
+        slot.gpio_cd                         = SDSPI_SLOT_NO_CD;
+        slot.gpio_wp                         = SDSPI_SLOT_NO_WP;
+        esp_vfs_fat_sdmmc_mount_config_t cfg = {};
+        cfg.format_if_mount_failed           = false;
+        cfg.max_files                        = 4;
+        cfg.allocation_unit_size             = 16384;
+        ESP_LOGI("NES-SD", "Mount attempt: SPI3 %d kHz, CS GPIO%d", frequency, int(slot.gpio_cs));
+        last = esp_vfs_fat_sdspi_mount("/sdcard", &host, &slot, &cfg, &card);
+        if (last == ESP_OK) {
+            mountedFrequency = frequency;
+            break;
+        }
+        ESP_LOGW("NES-SD", "Mount failed at %d kHz: %s (0x%x)", frequency, esp_err_to_name(last), last);
+        card = nullptr;
+    }
+    if (!card) {
+        error = "SD unavailable: " + std::string(esp_err_to_name(last)) + " (" + std::to_string(last) + ")";
         return false;
     }
-    ESP_LOGI("NES-SD", "SD mounted at 4 MHz, capacity %llu MiB",
+    ESP_LOGI("NES-SD", "SD mounted at %d kHz, capacity %llu MiB", mountedFrequency,
              (unsigned long long)card->csd.capacity * card->csd.sector_size / (1024 * 1024));
     return true;
 }
@@ -70,17 +84,19 @@ Library scanRoms()
             result.status = "Built-in ROM: " + info.error;
             return result;
         }
-        result.games.push_back({"Jackal / 赤色要塞", builtinRomPath, builtin.size});
-        result.status = "Built-in game / SD scan disabled";
-        return result;
+        result.games.push_back({"Guevara / 古巴战士", builtinRomPath, builtin.size});
     }
     std::lock_guard<std::mutex> lock(storageMutex);
     Access access;
     if (!access.ok) {
-        result.status = "Display/SD bus busy";
+        result.status = result.games.empty() ? "Display/SD bus busy" : "Built-in game; SD bus busy";
         return result;
     }
-    if (!mount(result.status)) return result;
+    std::string mountError;
+    if (!mount(mountError)) {
+        result.status = result.games.empty() ? mountError : "Built-in game; " + mountError;
+        return result;
+    }
     unsigned rejected = 0;
     for (auto dir : dirs) {
         std::string root = std::string("/sdcard") + dir;
@@ -134,7 +150,7 @@ uint8_t* loadRom(const std::string& path, size_t& size, std::string& error)
         }
         std::memcpy(data, builtin.data, builtin.size);
         size = builtin.size;
-        ESP_LOGI("NES", "Loaded built-in Jackal, %u bytes", unsigned(size));
+        ESP_LOGI("NES", "Loaded built-in Guevara, %u bytes", unsigned(size));
         return data;
     }
     if (!allowed(path)) {

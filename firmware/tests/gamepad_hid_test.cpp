@@ -8,6 +8,9 @@ int main()
     const uint8_t c10[] = {0x41, 0xc0, 1, 0, 128, 128, 128, 128};
     assert(decodeCodexPad(c10, sizeof c10, codex));
     assert(codex == (A | Up | Select | Start | Menu));
+    const uint8_t c10_with_report_id[] = {1, 0x41, 0xc0, 1, 0, 128, 128, 128, 128};
+    assert(decodeCodexPad(c10_with_report_id, sizeof c10_with_report_id, codex));
+    assert(codex == (A | Up | Select | Start | Menu));
     const uint8_t stick[] = {0, 0, 0, 0, 0, 255, 128, 128};
     assert(decodeCodexPad(stick, sizeof stick, codex));
     assert(codex == (Left | Down));
@@ -26,6 +29,9 @@ int main()
     assert(p.parseMap(map, sizeof map));
     uint8_t buttons[] = {1, 0};
     assert(p.input(1, buttons, 2));
+    assert(p.buttons() == A);
+    const uint8_t buttons_with_report_id[] = {1, 0x01, 0x00};
+    assert(p.input(1, buttons_with_report_id, sizeof buttons_with_report_id));
     assert(p.buttons() == A);
     uint8_t axis[] = {0, 128, 9};
     assert(p.input(2, axis, 3));
