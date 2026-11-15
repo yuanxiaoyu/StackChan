@@ -1,33 +1,6 @@
 #include "hid_parser.h"
 #include <algorithm>
 namespace gamepad {
-// CodexPad official codex_pad_bleak_lib protocol: FFA0/FFA1, <IBBBB.
-// Implemented from the published wire format, without vendor library code.
-bool decodeCodexPad(const uint8_t* p, size_t len, uint16_t& result)
-{
-    if (!p || (len != 8 && len != 9)) return false;
-    if (len == 9) {
-        // Some BLE stacks retain the private report's ID byte in notifications.
-        if (p[0] != 0 && p[0] != 1) return false;
-        ++p;
-    }
-    uint32_t bits = uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
-    uint16_t out  = 0;
-    static constexpr uint16_t mapping[] = {Up, Down, Left, Right, 0, 0, A, B, 0, 0, 0, 0, 0, 0, Select, Start, Menu};
-    for (unsigned i = 0; i < 17; ++i)
-        if (bits & (1u << i)) out |= mapping[i];
-    if (p[4] < 64)
-        out |= Left;
-    else if (p[4] > 191)
-        out |= Right;
-    if (p[5] < 64)
-        out |= Up;
-    else if (p[5] > 191)
-        out |= Down;
-    result = out;
-    return true;
-}
-
 bool HidParser::parseMap(const uint8_t* data, size_t len)
 {
     fields_.clear();

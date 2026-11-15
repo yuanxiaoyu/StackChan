@@ -23,6 +23,9 @@ file(GLOB_RECURSE STACK_CHAN_SOURCES
     "stackchan/*.cc"
     "stackchan/*.cpp"
 )
+# Register the private controller protocol explicitly for existing build trees.
+list(APPEND STACK_CHAN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/hal/gamepad/codexpad_protocol.cpp")
+list(REMOVE_DUPLICATES STACK_CHAN_SOURCES)
 set(STACK_CHAN_INCLUDE_DIRS 
     "."
 )

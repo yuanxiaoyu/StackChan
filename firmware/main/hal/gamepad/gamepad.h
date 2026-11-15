@@ -9,6 +9,7 @@ struct Device {
 };
 struct Snapshot {
     bool connected = false, scanning = false, connecting = false;
+    bool paired = false, ble_active = false;
     uint16_t buttons = 0;
     std::string name, status;
 };

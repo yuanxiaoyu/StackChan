@@ -1,10 +1,12 @@
 #include "gamepad.h"
 #include "hid_parser.h"
+#include "codexpad_protocol.h"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <esp_log.h>
 extern "C" {
 #include "host/ble_hs.h"
 #include "host/ble_gap.h"
@@ -72,6 +74,7 @@ void savePeer()
 }
 void fail(const char* text)
 {
+    ESP_LOGW("GAMEPAD", "%s", text);
     connectionFailed = true;
     state.connected  = false;
     state.connecting = false;
@@ -97,7 +100,10 @@ void beginConnect(const ble_addr_t& addr, const std::string& name)
     state.name       = name;
     state.status     = "Connecting";
     uint8_t own;
-    if (ble_hs_id_infer_auto(0, &own) || ble_gap_connect(own, &addr, 10000, nullptr, gap, nullptr)) {
+    int rc = ble_hs_id_infer_auto(0, &own);
+    if (!rc) rc = ble_gap_connect(own, &addr, 10000, nullptr, gap, nullptr);
+    ESP_LOGI("GAMEPAD", "Connect requested; rc=%d", rc);
+    if (rc) {
         state.connecting = false;
         state.status     = "Connection failed";
         ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(5000));
@@ -184,6 +190,7 @@ void nextReport()
         state.connected  = true;
         state.connecting = false;
         state.status     = "Connected";
+        ESP_LOGI("GAMEPAD", "Input ready; protocol=%s", codexPad ? "CodexPad" : "HID");
         savePeer();
         return;
     }
@@ -257,9 +264,10 @@ int services(uint16_t c, const ble_gatt_error* e, const ble_gatt_svc* svc, void*
         return 0;
     }
     if (e->status != BLE_HS_EDONE || !serviceStart) {
-        fail("No BLE HID service (Classic/private protocol unsupported)");
+        fail("No supported BLE gamepad service");
         return 0;
     }
+    ESP_LOGI("GAMEPAD", "Service discovered; protocol=%s", codexPad ? "CodexPad" : "HID");
     if (!codexPad) {
         ble_gap_conn_desc d{};
         if (ble_gap_conn_find(connection, &d) || !d.sec_state.encrypted) {
@@ -298,10 +306,15 @@ int gap(struct ble_gap_event* event, void*)
                 break;
             }
             bool hid = false;
-            for (unsigned i = 0; i < fields.num_uuids16; ++i) hid |= ble_uuid_u16(&fields.uuids16[i].u) == 0x1812;
+            bool codex = isCodexPadAdvertisement(fields.name, fields.name_len, fields.mfg_data, fields.mfg_data_len);
+            for (unsigned i = 0; i < fields.num_uuids16; ++i) {
+                const auto uuid = ble_uuid_u16(&fields.uuids16[i].u);
+                hid |= uuid == 0x1812;
+                codex |= uuid == 0xffa0;
+            }
             bool known = std::any_of(found.begin(), found.end(),
                                      [&](const auto& d) { return ble_addr_cmp(&d.addr, &event->disc.addr) == 0; });
-            if (!hid && !known && event->disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_ADV_IND &&
+            if (!hid && !codex && !known && event->disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_ADV_IND &&
                 event->disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_DIR_IND)
                 break;
             char id[24];
@@ -310,7 +323,7 @@ int gap(struct ble_gap_event* event, void*)
                           event->disc.addr.val[1], event->disc.addr.val[0]);
             std::string name = fields.name ? std::string(reinterpret_cast<const char*>(fields.name),
                                                          std::min<unsigned>(fields.name_len, 48))
-                                           : (hid ? "BLE HID Gamepad" : "BLE device (HID unverified)");
+                                           : (codex ? "CodexPad" : hid ? "BLE HID Gamepad" : "BLE device (unverified)");
             auto it          = std::find_if(found.begin(), found.end(), [&](auto& d) { return d.device.id == id; });
             if (it == found.end() && found.size() < 24)
                 found.push_back({{id, name}, event->disc.addr});
@@ -324,6 +337,7 @@ int gap(struct ble_gap_event* event, void*)
             if (autoReconnect && haveSaved) ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(5000));
             break;
         case BLE_GAP_EVENT_CONNECT:
+            ESP_LOGI("GAMEPAD", "Connect result; status=%d", event->connect.status);
             if (event->connect.status) {
                 state.connecting = false;
                 state.status     = "Connection failed";
@@ -356,6 +370,7 @@ int gap(struct ble_gap_event* event, void*)
             return BLE_GAP_REPEAT_PAIRING_IGNORE;
         case BLE_GAP_EVENT_DISCONNECT:
             if (event->disconnect.conn.conn_handle != connection) break;
+            ESP_LOGI("GAMEPAD", "Disconnected; reason=%d", event->disconnect.reason);
             connection       = BLE_HS_CONN_HANDLE_NONE;
             state.connected  = false;
             state.connecting = false;
@@ -373,9 +388,11 @@ int gap(struct ble_gap_event* event, void*)
             if (it == reports.end()) break;
             uint8_t bytes[512];
             size_t n = OS_MBUF_PKTLEN(event->notify_rx.om);
+            if (codexPad) state.buttons = 0;
             if (n <= sizeof bytes && !os_mbuf_copydata(event->notify_rx.om, 0, n, bytes)) {
-                if (codexPad)
-                    decodeCodexPad(bytes, n, state.buttons);
+                if (codexPad) {
+                    if (!decodeCodexPad(bytes, n, state.buttons)) state.buttons = 0;
+                }
                 else if (parser.input(it->id, bytes, n))
                     state.buttons = parser.buttons();
             }
@@ -411,10 +428,15 @@ void execute(struct ble_npl_event*)
         startScan();
     }
     if (op == Cancel) {
-        if (state.scanning && connection == BLE_HS_CONN_HANDLE_NONE && !state.connecting) autoReconnect = false;
+        // Leaving Setup must restore reconnect for a remembered controller,
+        // including one that was switched off during a manual rescan.
+        autoReconnect = haveSaved;
         ble_gap_disc_cancel();
         state.scanning = false;
-        state.status   = "Scan cancelled";
+        if (!state.connected && !state.connecting) {
+            state.status = haveSaved ? "Waiting for saved gamepad" : "Scan cancelled";
+            if (haveSaved) ble_npl_callout_reset(&retry, ble_npl_time_ms_to_ticks32(100));
+        }
     }
     if (op == Connect) {
         autoReconnect = true;
@@ -548,6 +570,9 @@ void forget()
 Snapshot snapshot()
 {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    return state;
+    auto result = state;
+    result.paired = haveSaved;
+    result.ble_active = ble_prph_is_initialized();
+    return result;
 }
 }  // namespace gamepad

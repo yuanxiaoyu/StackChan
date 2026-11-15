@@ -16,6 +16,7 @@ int main(void) {
     assert(apu_init(24000, false) == NULL);
     apu_shutdown();
     for (int cycle = 0; cycle < 3; ++cycle) {
+        const int sample_rate = cycle == 2 ? 16000 : 24000;
         const size_t trainer_size = cycle == 1 ? 512 : 0;
         const size_t offset = 16 + trainer_size;
         const size_t size = offset + 16384 + 8192;
@@ -37,7 +38,7 @@ int main(void) {
         };
         memcpy(data + offset, poll_controller, sizeof(poll_controller));
         data[offset + 16384 - 3] = 0x80;
-        assert(nes_init(SYS_NES_NTSC, 24000, false, NULL));
+        assert(nes_init(SYS_NES_NTSC, sample_rate, false, NULL));
         assert(nes_insertcart(rom_loadmem(data, size)) == 0);
         if (trainer_size) {
             assert(memcmp(nes_getptr()->cart->prg_ram + 0x1000, data+16, 512) == 0);
@@ -50,7 +51,7 @@ int main(void) {
         nes_setvidbuf(video);
         input_connect(0, NES_JOYPAD);
         assert(nes_getptr()->apu->buffer);
-        assert(nes_getptr()->apu->samples_per_frame == 400);
+        assert(nes_getptr()->apu->samples_per_frame == sample_rate / 60);
         for (int frame = 0; frame < 120; ++frame) {
             const uint8_t mask = frame % 9 == 8 ? 0 : 1 << (frame % 9);
             input_update(0, mask);
@@ -59,7 +60,7 @@ int main(void) {
                 assert(nes_getptr()->mem->ram[0x200 + bit] == ((mask >> bit) & 1));
             // Read all output samples, as the production audio consumer does.
             volatile int16_t sample;
-            for (int i = 0; i < 400; ++i) sample = nes_getptr()->apu->buffer[i];
+            for (int i = 0; i < nes_getptr()->apu->samples_per_frame; ++i) sample = nes_getptr()->apu->buffer[i];
             (void)sample;
         }
         nes_shutdown();

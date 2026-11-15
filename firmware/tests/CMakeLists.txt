@@ -47,10 +47,20 @@ target_include_directories(game_rom_test PRIVATE ../main)
 target_compile_features(game_rom_test PRIVATE cxx_std_17)
 add_test(NAME game_rom_test COMMAND $<TARGET_FILE:game_rom_test>)
 
-add_executable(gamepad_hid_test gamepad_hid_test.cpp ../main/hal/gamepad/hid_parser.cpp)
+add_executable(gamepad_hid_test gamepad_hid_test.cpp ../main/hal/gamepad/hid_parser.cpp ../main/hal/gamepad/codexpad_protocol.cpp)
 target_include_directories(gamepad_hid_test PRIVATE ../main)
 target_compile_features(gamepad_hid_test PRIVATE cxx_std_17)
 add_test(NAME gamepad_hid_test COMMAND $<TARGET_FILE:gamepad_hid_test>)
+
+add_executable(codexpad_test codexpad_test.cpp ../main/hal/gamepad/codexpad_protocol.cpp)
+target_include_directories(codexpad_test PRIVATE ../main)
+target_compile_features(codexpad_test PRIVATE cxx_std_17)
+add_test(NAME codexpad_test COMMAND $<TARGET_FILE:codexpad_test>)
+
+add_executable(game_input_test game_input_test.cpp)
+target_include_directories(game_input_test PRIVATE ../main)
+target_compile_features(game_input_test PRIVATE cxx_std_17)
+add_test(NAME game_input_test COMMAND $<TARGET_FILE:game_input_test>)
 
 file(GLOB NOFRENDO_HOST_SOURCES ../components/nofrendo/nes/*.c ../components/nofrendo/mappers/*.c)
 add_executable(nofrendo_smoke_test nofrendo_smoke_test.c ${NOFRENDO_HOST_SOURCES})

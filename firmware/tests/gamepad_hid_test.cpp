@@ -1,4 +1,5 @@
 #include "hal/gamepad/hid_parser.h"
+#include "hal/gamepad/codexpad_protocol.h"
 #include <cassert>
 #include <vector>
 using namespace gamepad;
@@ -9,13 +10,13 @@ int main()
     assert(decodeCodexPad(c10, sizeof c10, codex));
     assert(codex == (A | Up | Select | Start | Menu));
     const uint8_t c10_with_report_id[] = {1, 0x41, 0xc0, 1, 0, 128, 128, 128, 128};
-    assert(decodeCodexPad(c10_with_report_id, sizeof c10_with_report_id, codex));
+    assert(!decodeCodexPad(c10_with_report_id, sizeof c10_with_report_id, codex));
     assert(codex == (A | Up | Select | Start | Menu));
     const uint8_t stick[] = {0, 0, 0, 0, 0, 255, 128, 128};
     assert(decodeCodexPad(stick, sizeof stick, codex));
-    assert(codex == (Left | Down));
+    assert(codex == (Left | Up));
     assert(!decodeCodexPad(stick, 7, codex));
-    assert(codex == (Left | Down));
+    assert(codex == (Left | Up));
     const uint8_t center[] = {0, 0, 0, 0, 128, 128, 128, 128};
     assert(decodeCodexPad(center, sizeof center, codex));
     assert(codex == 0);

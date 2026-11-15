@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include "game_runtime.h"
 #include "game_remote.h"
+#include "game_input.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -27,6 +28,8 @@ private:
     std::shared_ptr<ScanResult> scan_;
     std::shared_ptr<RadioState> radio_;
     game::ConnectionPause connection_pause_;
+    game::InputTransport input_transport_ = game::InputTransport::EspNow;
+    bool ble_connected_before_ = false;
     game::Library library_;
     lv_obj_t *root_ = nullptr, *image_ = nullptr, *info_ = nullptr;
     std::array<lv_obj_t*, 4> rows_{};

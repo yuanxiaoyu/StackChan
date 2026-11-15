@@ -647,6 +647,11 @@ void bleprph_host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
+bool ble_prph_is_initialized(void)
+{
+    return s_initialized;
+}
+
 void ble_prph_init(bool use_alt_uuid)
 {
     /*

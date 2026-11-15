@@ -3,7 +3,6 @@
 #include <array>
 #include <cstddef>
 namespace gamepad {
-bool decodeCodexPad(const uint8_t*, size_t, uint16_t&);
 // Bounded parser for variable absolute gamepad fields. HOGP reports omit ID bytes:
 // the Report Reference descriptor supplies the ID to input().
 class HidParser {

@@ -1,5 +1,6 @@
 #include "gamepad_setup_worker.h"
 #include <hal/hal.h>
+#include <board.h>
 #include <algorithm>
 
 LV_FONT_DECLARE(agent_tasks_cjk_14);
@@ -28,6 +29,9 @@ lv_obj_t* control(lv_obj_t* parent, const char* value, int x, int y, int width)
 
 GamepadSetupWorker::GamepadSetupWorker()
 {
+    // The first GAME launch needs I2S DMA buffers in internal RAM. Reserve
+    // them before NimBLE fragments that heap during pairing/discovery.
+    Board::GetInstance().GetAudioCodec();
     gamepad::initialize(); GetHAL().startBleServer();
     root_ = lv_obj_create(lv_screen_active());
     lv_obj_set_size(root_, 320, 240); lv_obj_set_pos(root_, 0, 0);
@@ -61,7 +65,7 @@ GamepadSetupWorker::GamepadSetupWorker()
     lv_obj_add_event_cb(back, [](lv_event_t* e) {
         static_cast<GamepadSetupWorker*>(lv_event_get_user_data(e))->_is_done = true;
     }, LV_EVENT_CLICKED, this);
-    text(root_, "自带遥控器使用 GAME 的 Remote 模式", 12, 222, 295);
+    text(root_, "C10: X=Select  Y=Menu  A/B/Start", 12, 222, 295);
     gamepad::scan();
 }
 
@@ -83,7 +87,15 @@ void GamepadSetupWorker::update()
     last_update_ = now;
     const auto snapshot = gamepad::snapshot();
     std::string status = snapshot.status;
-    if (snapshot.connected) status = "Connected: " + snapshot.name;
+    if (snapshot.connected) {
+        status = "Connected: " + snapshot.name + "\nKeys:";
+        static constexpr struct { uint16_t mask; const char* label; } keys[] = {
+            {gamepad::Up, " Up"}, {gamepad::Down, " Down"}, {gamepad::Left, " Left"},
+            {gamepad::Right, " Right"}, {gamepad::A, " A"}, {gamepad::B, " B"},
+            {gamepad::Select, " Select"}, {gamepad::Start, " Start"}, {gamepad::Menu, " Menu"}};
+        for (const auto& key : keys) if (snapshot.buttons & key.mask) status += key.label;
+        if (!snapshot.buttons) status += " released";
+    }
     lv_label_set_text(state_, status.c_str());
     auto list = gamepad::devices();
     bool changed = list.size() != devices_.size();

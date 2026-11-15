@@ -1,6 +1,6 @@
 # StackChan GAME 使用与验证
 
-开发分支：`codex/fc-emulator-feasibility`。基于官方 ESP-IDF 6.1 / Mooncake / HAL，新增 GAME 和 Setup → Apps → Gamepad / 蓝牙手柄。
+当前 C10 适配分支：`codex/codexpad-c10-game`，基于 `codex/fc-emulator-feasibility` 的 `d53fddb`。保留官方 ESP-IDF 6.1 / Mooncake / HAL 和 Setup → Apps → Gamepad / 蓝牙手柄。
 
 ## 内存卡和游戏
 
@@ -10,7 +10,7 @@
 
 插入 FAT 格式 microSD，在 `/room` 放未压缩 `.nes` 文件；也兼容 `/rom`、`/roms/nes`、`/roms`、`/ROM` 的直接子文件。支持 UTF-8 长文件名，最多列出 128 个通过检查的文件；点击 Refresh 可重读列表。目录不递归，ZIP、FDS、NES 2.0 不支持。文件上限 1 MiB；当前允许 Mapper 0、1、2、3、4、7、9、10、11、66、71，以实际游戏运行结果为准。
 
-只读原 ROM，不格式化卡、不创建存档。换卡前先退出 GAME；首版暂不支持 SRAM 电池存档或即时存档。游戏以 256×240 原分辨率居中显示，两侧各留 32 像素，避免缩放并减少 LCD 传输量。点击画面可打开暂停菜单，再选 Start 开始游戏。当前按用户最新要求启用游戏声音，将 APU 生成的 PCM16 输出至现有 24 kHz 音频驱动；用户稍后在适合时自行测试。
+只读原 ROM，不格式化卡、不创建存档。换卡前先退出 GAME；首版暂不支持 SRAM 电池存档或即时存档。游戏以 256×240 生成画面并拉伸至 320×240 全屏。点击画面可打开暂停菜单，再选 Start 开始游戏。游戏 APU 按实际音频驱动采样率生成 PCM16，当前主机为 16 kHz，避免固定 24 kHz 音频在 16 kHz 驱动上降调或拖慢游戏。
 
 ## 先用原配遥控器
 
@@ -28,13 +28,28 @@ StickC-Plus + Hat Mini JoyC 没有触摸屏，使用实体按键与摇杆。需�
 
 原遥控器固件的舵机报文仅提供方向与短 A 脉冲兼容，不能提供完整 FC 操作；请使用新版。新版以 20 ms 心跳发送完整按键，主机在 300 ms 无报文时释放全部按键并暂停。
 
-ESP-NOW 占用现有 Wi-Fi 模式；离开 GAME 会重启回主菜单以恢复日常网络功能，保留已有配置。当前进入 GAME 总会启用此模式，即使已连接蓝牙手柄。
+ESP-NOW 占用现有 Wi-Fi 模式；使用该模式离开 GAME 会重启回主菜单以恢复日常网络功能，保留已有配置。C10 分支仅在没有保存蓝牙手柄且 BLE 尚未启动时自动使用此模式。有已保存的蓝牙手柄（即使手柄暂未开机）或本次已进入 Gamepad 设置启动了 BLE 时，GAME 使用蓝牙，避免 ESP-NOW 与 BLE 同时启动造成内存不足。需要回到原配遥控器时，先在 Setup → Apps → Gamepad 选择 Forget，再重启主机进入 GAME。
 
-## CodexPad C10 到货后
+## CodexPad C10 游戏操作
 
-在 Setup → Apps → Gamepad / 蓝牙手柄点击 Scan，选择手柄名称，等待 Connected；Forget 可忘记连接并重新选择。也支持部分标准 BLE HID 手柄。ESP32-S3 不支持 Bluetooth Classic。
+1. 打开 C10 电源，蓝灯慢闪表示等待连接。进入主机 Setup → Apps → Gamepad，点击 Scan，选择 `CodexPad-C10`（名称尚未取得时可能显示 `CodexPad`），等待 Connected。C10 V2 长时间未连接会自动关机，若扫描不到请 OFF → ON 后再 Scan。
+2. 连接后设置页第二行 `Keys:` 显示当前输入。先确认摇杆与 A/B/X/Y/Start 的按下和松开，再返回主菜单打开 GAME；游戏列表用摇杆上下选择，A 或 Start 进入。
+3. 使用下表控制游戏。主机仍可用触屏打开暂停菜单；Y 可以直接开菜单，菜单中再次按 Y 返回游戏。
+4. C10 关机或失联，BLE 确认断开时立即释放全部按键，游戏打开暂停菜单。保存的手柄会自动重连，重连后选择 Resume 继续。手柄保持静止不发通知不被当成掉线。
+5. Forget 可忘记连接并重新选择。也支持部分标准 BLE HID 手柄；ESP32-S3 不支持 Bluetooth Classic。
 
-C10 按官方 Python 库的 FFA0 服务 / FFA1 通知、8 字节状态协议适配，并非假定它使用标准 HID。蓝牙连接成功时优先采用蓝牙输入；方向键/左摇杆、A/B、Start/Select 用于游戏，Menu 或 Start+Select 长按 0.5 秒打开暂停菜单。设备身份和 BLE bond 保存在 NVS，自动重连。C10 尚在邮寄，未进行实机按键/重连验收。
+C10 通过 FFA0 服务 / FFA1 通知的严格 8 字节 `<IBBBB` 状态协议适配；不使用 HID report ID，不额外安装 Arduino 或 Python 库。协议和实体布局参考 [C10 官方说明](https://github.com/CodexPad/codex_pad_c10) 与 [官方 BLE 库](https://github.com/CodexPad/codex_pad_bleak_lib/blob/main/codex_pad.py)，参考库提交 `50f147493fb30dcaa9deda91464464ce1195e11f`。设备地址保存在 NVS；标准 HID 的 BLE bond 机制保留，C10 本身不强制 HID 配对。
+
+| C10 控件 | GAME 功能 |
+| --- | --- |
+| 左摇杆 | 上下左右，可斜向 |
+| A（红）/ B（白） | FC A / B；菜单确认 / 返回列表 |
+| Start | 游戏 Start；列表启动所选游戏 |
+| X（蓝） | 游戏 Select，包括《赤色要塞》YES/NO 切换 |
+| Y（黄） | 打开/关闭暂停菜单 |
+| Start + X 长按 0.5 秒 | 暂停菜单的备用组合 |
+
+本轮验收状态：用户已确认 C10 连接、游戏与暂停菜单四方向、Y/菜单、断线暂停及重连恢复操作正常。A/B 的反馈为“好像正常”；X/Select 尚未单独实测。首次进入 GAME 的音频内存分配修正已构建，待重新连接 USB 后刷入验证。电脑端检查结果见下文。
 
 蓝牙服务复用官方现有单一 NimBLE host，未添加第二个蓝牙协议栈；扫描列表可包含尚未确认支持的 BLE 设备，连接后检查服务/协议并反馈失败原因。
 
@@ -46,7 +61,15 @@ GAME 图标使用现有 188×150 RGB565A8 资产格式，透明背景、粗黑�
 
 主机使用 ESP-IDF 6.1，遥控器使用 ESP-IDF 5.5.4（原仓库标注 5.4.2，验证环境未安装该版本），依赖及 M5GFX legacy-I2C 补丁见 `remote/code/README.md`。烧录前备份，避免使用会覆盖主机 NVS、OTA 数据或分区表的全量 flash 命令。遥控器升级也需先核对设备型号与分区。
 
-## 验证记录（2026-11-13）
+## C10 分支验证记录（2026-11-15）
+
+- 宿主 CTest 11/11 通过：新增 C10 实体键位、广播识别和报文边界，以及 BLE/ESP-NOW 输入选择和掉线暂停回归；模拟器音频检查覆盖 16 kHz。
+- ESP-IDF 6.1 固件构建通过，最终应用镜像 4,781,552 字节，应用分区剩余 395,792 字节。既有小智依赖补丁反向检查通过。原应用已备份，方向修正版仅写入 `0x20000` 应用分区并通过完整哈希校验。
+- 用户确认 C10 显示 Connected，设置页按住 A 时显示 `Keys: A`。GAME 日志确认走 BLE，读出内置《古巴战士》，模拟核心约 60 FPS、显示约 14 FPS，源/输出采样率均为 16 kHz。
+- 用户报告上推实际向下；已将 C10 模拟 Y 轴改为高值向上、低值向下，通用 HID 不变。新增回归先在旧映射失败，修正后 11/11 通过。用户确认修正版菜单和游戏四方向均正确，并确认 C10 关机后自动暂停、重新开机后重连并可恢复操作；Y/菜单亦随该流程验证。用户表示 A/B 看似正常，未扩大为全部按键验收；X/Select 尚未单独实测。
+- 测试中捕获“先进入手柄设置、连接后首次进入 GAME”时 I2S DMA 初始化报 `ESP_ERR_NO_MEM` 并重启，回溯定位至 `CoreS3AudioCodec::CreateDuplexChannels`。手柄设置页现先创建主机音频 codec，再启动 NimBLE，提前保留 DMA 内存。该修正已构建通过；刷写前 USB 断开，最后一次写入未开始，仍待实机验证此路径。
+
+## 既有验证记录（2026-11-13）
 
 - 宿主 CTest：8/8 通过，覆盖既有运动/看板/手势、遥控协议、ROM 边界、HID/C10 解码、模拟核心及 trainer/音频分配失败。
 - 独立审查发现并修复 trainer 未装入 PRG RAM、APU 分配失败与蓝牙断连覆盖错误提示问题。

@@ -93,7 +93,8 @@ void AppGame::draw(Screen screen)
         button("<", 8, 200, 36, Action::Previous);
         button(">", 48, 200, 36, Action::Next);
         button("Refresh", 90, 200, 96, Action::Refresh);
-        button(radio_started_ ? "Remote:1" : "Remote", 192, 200, 120, Action::Remote);
+        button(input_transport_ == game::InputTransport::Ble ? "BLE Gamepad" :
+               radio_started_ ? "Remote:1" : "Remote", 192, 200, 120, Action::Remote);
     } else if (screen == Screen::Paused) {
         info_ = label(root_, message_.empty() ? "Paused" : message_.c_str(), 12, 34, 296);
         pause_buttons_[0] = button("Resume", 12, 77, 142, Action::Resume);
@@ -159,6 +160,11 @@ void AppGame::beginScan()
 
 void AppGame::enableRemote()
 {
+    if (input_transport_ == game::InputTransport::Ble) {
+        radio_requested_ = false;
+        message_ = "C10: connect in Setup > Apps > Gamepad";
+        return;
+    }
     if (radio_started_) return;
     radio_requested_ = false;
     radio_started_ = GetHAL().startEspNow(1);
@@ -212,7 +218,16 @@ void AppGame::onOpen()
     action_ = Action::None; selected_ = 0; previous_buttons_ = 0;
     connected_before_ = false; combo_used_ = false; combo_at_ = 0;
     connection_pause_ = {};
-    radio_started_ = false; radio_requested_ = true;
+    // Reading saved identity does not start the BLE host or allocate its buffers.
+    gamepad::initialize();
+    const auto controller = gamepad::snapshot();
+    input_transport_ = game::chooseInputTransport(controller.paired, controller.ble_active);
+    ESP_LOGI("GAME", "Input=%s saved=%d BLE_active=%d connected=%d",
+             input_transport_ == game::InputTransport::Ble ? "BLE" : "ESP-NOW",
+             controller.paired, controller.ble_active, controller.connected);
+    ble_connected_before_ = controller.connected;
+    radio_started_ = false;
+    radio_requested_ = input_transport_ == game::InputTransport::EspNow;
     const auto builtin = game::builtinRom();
     if (builtin.data) {
         library_.games.push_back({"Guevara / 古巴战士", game::builtinRomPath, builtin.size});
@@ -234,7 +249,7 @@ void AppGame::onOpen()
     // ESP-NOW allocates Wi-Fi buffers from internal RAM. Start it before the
     // audio codec and BLE host consume that pool, otherwise radio startup can
     // fail with ESP_ERR_NO_MEM and leave the remote silently unusable.
-    enableRemote();
+    if (radio_requested_) enableRemote();
     frame_desc_ = {};
     frame_desc_.header.magic = LV_IMAGE_HEADER_MAGIC;
     frame_desc_.header.cf = LV_COLOR_FORMAT_RGB565;
@@ -242,12 +257,12 @@ void AppGame::onOpen()
     frame_desc_.header.stride = game::FrameWidth * 2;
     frame_desc_.data_size = game::FramePixels * 2;
     frame_desc_.data = reinterpret_cast<const uint8_t*>(frame_);
-    // One existing NimBLE host serves both BLE peripherals and gamepad clients.
-    // ESP-NOW and NimBLE together exceed the available internal heap on this
-    // board. Keep the radio input active when it started successfully; BLE
-    // gamepad support remains available when ESP-NOW cannot be started.
+    // Use one radio input mode per GAME session. A remembered BLE controller
+    // must never lose its buffers to automatic ESP-NOW startup, even if off.
     ESP_LOGI("GAME", "Initializing gamepad and BLE");
     if (!radio_started_) {
+        input_transport_ = game::InputTransport::Ble;
+        radio_requested_ = false;
         gamepad::initialize();
         game::setInputReader([]() -> uint16_t {
             const auto ble = gamepad::snapshot();
@@ -283,7 +298,9 @@ void AppGame::updateInput(uint32_t now)
     const uint16_t pressed = mask & ~previous_buttons_;
     const bool changed = mask != previous_buttons_;
     previous_buttons_ = mask;
-    const bool lost_controller = connection_pause_.update(connected, GetHAL().millis());
+    const bool lost_ble = game::bluetoothControllerLost(input_transport_, ble_connected_before_, ble.connected);
+    ble_connected_before_ = ble.connected;
+    const bool lost_controller = connection_pause_.update(connected, GetHAL().millis()) || lost_ble;
     if (screen_ == Screen::Playing) {
         if (lost_controller) {
             ESP_LOGW("GAME-INPUT", "Controller expired while playing");

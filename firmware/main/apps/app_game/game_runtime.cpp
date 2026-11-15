@@ -46,6 +46,7 @@ void worker(void*)
     bool initialized  = false;
     bool jackalCompatible = false;
     AudioCodec* codec = nullptr;
+    int sampleRate = 24000;
     bool wasOutput    = false;
     if (!data) {
         fail(error);
@@ -60,7 +61,9 @@ void worker(void*)
         fail("Not enough memory for NES video");
         goto cleanup;
     }
-    if (!nes_init(SYS_NES_NTSC, 24000, false, nullptr)) {
+    codec = Board::GetInstance().GetAudioCodec();
+    if (codec) sampleRate = codec->output_sample_rate();
+    if (!nes_init(SYS_NES_NTSC, sampleRate, false, nullptr)) {
         fail("NES initialization failed");
         goto cleanup;
     }
@@ -76,14 +79,13 @@ void worker(void*)
     nes_setvidbuf(video);
     input_connect(0, NES_JOYPAD);
     ESP_LOGI("NES", "Started mapper %d, ROM %u bytes", nes_getptr()->cart->mapper_number, unsigned(size));
-    codec = Board::GetInstance().GetAudioCodec();
     if (codec) {
         wasOutput = codec->output_enabled();
         codec->EnableOutput(true);
     }
     ESP_LOGI("NES", "Game audio enabled");
     {
-        std::vector<int16_t> pcm(400);
+        std::vector<int16_t> pcm(nes_getptr()->apu->samples_per_frame);
         TickType_t next       = xTaskGetTickCount();
         uint32_t count        = 0;
         int64_t reportTime    = esp_timer_get_time();
@@ -164,8 +166,8 @@ void worker(void*)
                          unsigned(count), n * 1000000.0 / (now - reportTime),
                          drawn * 1000000.0 / (now - reportTime), emulateUs / (n * 1000),
                          audioUs / (n * 1000), videoUs / (n * 1000), waitUs / (n * 1000));
-                ESP_LOGI("NES-AUDIO", "muted=0 source_hz=24000 sink_hz=%d enabled=%d volume=%d samples=%u nonzero=%u peak=%d rms=%.1f clipped=%u sink_nonzero=%u",
-                         codec ? codec->output_sample_rate() : 0, codec && codec->output_enabled(),
+                ESP_LOGI("NES-AUDIO", "muted=0 source_hz=%d sink_hz=%d enabled=%d volume=%d samples=%u nonzero=%u peak=%d rms=%.1f clipped=%u sink_nonzero=%u",
+                         sampleRate, codec ? codec->output_sample_rate() : 0, codec && codec->output_enabled(),
                          codec ? codec->output_volume() : 0, unsigned(audioSamples), unsigned(sourceNonzero),
                          sourcePeak, audioSamples ? std::sqrt(sourceSquares / audioSamples) : 0.0,
                          unsigned(sourceClipped), unsigned(sinkNonzero));
@@ -176,7 +178,7 @@ void worker(void*)
                 emulateUs = audioUs = videoUs = waitUs = 0;
                 drawn = 0;
             }
-            // Audio clocks at 24 kHz; fallback/overrun yielding also feeds the watchdog.
+            // Audio uses the codec clock; fallback/overrun yielding also feeds the watchdog.
             vTaskDelayUntil(&next, pdMS_TO_TICKS(16));
             if (xTaskGetTickCount() - next > pdMS_TO_TICKS(100)) next = xTaskGetTickCount();
             waitUs += esp_timer_get_time() - videoEnd;
