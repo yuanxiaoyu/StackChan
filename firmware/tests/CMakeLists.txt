@@ -4,6 +4,15 @@ project(stackchan_firmware_tests LANGUAGES C CXX)
 
 enable_testing()
 
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+add_test(
+    NAME partition_layout_test
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_partition_layout.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/../partitions.csv
+)
+
 add_executable(game_menu_test game_menu_test.cpp)
 target_include_directories(game_menu_test PRIVATE ../main)
 target_compile_features(game_menu_test PRIVATE cxx_std_17)
